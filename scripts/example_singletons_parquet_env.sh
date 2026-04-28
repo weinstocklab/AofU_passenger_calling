@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/example_singletons_common_env.sh"
 
-export JOB_MODE="all"
+export JOB_MODE="parquet"
 export NUM_WORKERS="2"
 export NUM_SECONDARY_WORKERS="0"
 

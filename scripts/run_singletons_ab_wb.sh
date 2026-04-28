@@ -10,6 +10,7 @@ set -euo pipefail
 #   WORKSPACE_ID          Workbench workspace ID (somatic workspace)
 #   VDS_URI               gs:// path to short-read VDS
 #   OUTPUT_PARQUET_URI    gs:// output parquet dataset path
+#   CHECKPOINT_HT_URI     gs:// checkpoint Hail Table path
 #   TMP_DIR_URI           gs:// temp path for Hail/Spark
 #   SCRIPT_GS_URI         gs:// path to upload the pyspark script
 #
@@ -19,15 +20,20 @@ set -euo pipefail
 #   CLUSTER_ID            Dataproc cluster name (default: somatic-hail-cluster)
 #   REGION                GCP region (default: us-central1)
 #   MANAGER_MACHINE_TYPE  default: n2-standard-4
+#   MANAGER_BOOT_DISK_SIZE default: 100
 #   WORKER_MACHINE_TYPE   default: n2-standard-8
+#   WORKER_BOOT_DISK_SIZE default: 100
 #   NUM_WORKERS           default: 4
+#   SECONDARY_WORKER_MACHINE_TYPE default: n2-standard-4
+#   SECONDARY_WORKER_BOOT_DISK_SIZE default: 100
 #   NUM_SECONDARY_WORKERS default: 20
 #   SECONDARY_WORKER_TYPE default: spot
 #   AB_MIN                default: 0.1
 #   AB_MAX                default: 0.3
-#   IDLE_DELETE_TTL       Dataproc idle auto-delete TTL (default: 600s)
+#   IDLE_DELETE_TTL       Dataproc idle auto-delete TTL (default: 1800s)
 #   REQUESTER_PAYS_PROJECT billing project for requester-pays GCS buckets
 #   REQUESTER_PAYS_BUCKETS optional comma-separated requester-pays bucket list
+#   JOB_MODE              one of checkpoint, parquet, all (default: all)
 #   CONTIGS               optional comma-separated contig list for pilot runs
 #   OVERWRITE             set to 1 to pass --overwrite to the Hail job
 #   STARTUP_RETRIES       submission retries while the cluster becomes ready (default: 20)
@@ -37,6 +43,7 @@ WB_BIN="${WB_BIN:-wb}"
 WORKSPACE_ID="${WORKSPACE_ID:?Set WORKSPACE_ID}"
 VDS_URI="${VDS_URI:?Set VDS_URI}"
 OUTPUT_PARQUET_URI="${OUTPUT_PARQUET_URI:?Set OUTPUT_PARQUET_URI}"
+CHECKPOINT_HT_URI="${CHECKPOINT_HT_URI:-}"
 TMP_DIR_URI="${TMP_DIR_URI:?Set TMP_DIR_URI}"
 SCRIPT_GS_URI="${SCRIPT_GS_URI:?Set SCRIPT_GS_URI}"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -46,15 +53,20 @@ CLUSTER_RESOURCE_ID="${CLUSTER_RESOURCE_ID:-somatic_hail_cluster}"
 CLUSTER_ID="${CLUSTER_ID:-somatic-hail-cluster}"
 REGION="${REGION:-us-central1}"
 MANAGER_MACHINE_TYPE="${MANAGER_MACHINE_TYPE:-n2-standard-4}"
+MANAGER_BOOT_DISK_SIZE="${MANAGER_BOOT_DISK_SIZE:-100}"
 WORKER_MACHINE_TYPE="${WORKER_MACHINE_TYPE:-n2-standard-8}"
+WORKER_BOOT_DISK_SIZE="${WORKER_BOOT_DISK_SIZE:-100}"
 NUM_WORKERS="${NUM_WORKERS:-4}"
+SECONDARY_WORKER_MACHINE_TYPE="${SECONDARY_WORKER_MACHINE_TYPE:-n2-standard-4}"
+SECONDARY_WORKER_BOOT_DISK_SIZE="${SECONDARY_WORKER_BOOT_DISK_SIZE:-100}"
 NUM_SECONDARY_WORKERS="${NUM_SECONDARY_WORKERS:-20}"
 SECONDARY_WORKER_TYPE="${SECONDARY_WORKER_TYPE:-spot}"
 AB_MIN="${AB_MIN:-0.1}"
 AB_MAX="${AB_MAX:-0.3}"
-IDLE_DELETE_TTL="${IDLE_DELETE_TTL:-600s}"
+IDLE_DELETE_TTL="${IDLE_DELETE_TTL:-1800s}"
 REQUESTER_PAYS_PROJECT="${REQUESTER_PAYS_PROJECT:-}"
 REQUESTER_PAYS_BUCKETS="${REQUESTER_PAYS_BUCKETS:-}"
+JOB_MODE="${JOB_MODE:-all}"
 CONTIGS="${CONTIGS:-}"
 OVERWRITE="${OVERWRITE:-}"
 STARTUP_RETRIES="${STARTUP_RETRIES:-20}"
@@ -168,8 +180,12 @@ if ! "${WB_BIN}" resource describe --id="${CLUSTER_RESOURCE_ID}" >/dev/null 2>&1
     --region="${REGION}" \
     --idle-delete-ttl="${IDLE_DELETE_TTL}" \
     --manager-machine-type="${MANAGER_MACHINE_TYPE}" \
+    --manager-boot-disk-size="${MANAGER_BOOT_DISK_SIZE}" \
     --worker-machine-type="${WORKER_MACHINE_TYPE}" \
+    --worker-boot-disk-size="${WORKER_BOOT_DISK_SIZE}" \
     --num-workers="${NUM_WORKERS}" \
+    --secondary-worker-machine-type="${SECONDARY_WORKER_MACHINE_TYPE}" \
+    --secondary-worker-boot-disk-size="${SECONDARY_WORKER_BOOT_DISK_SIZE}" \
     --num-secondary-workers="${NUM_SECONDARY_WORKERS}" \
     --secondary-worker-type="${SECONDARY_WORKER_TYPE}" \
     --quiet
@@ -249,8 +265,13 @@ sys.argv = [
     "--tmp-dir", ${TMP_DIR_URI@Q},
     "--ab-min", ${AB_MIN@Q},
     "--ab-max", ${AB_MAX@Q},
+    "--job-mode", ${JOB_MODE@Q},
 ]
 EOF
+
+if [[ -n "${CHECKPOINT_HT_URI}" ]]; then
+  printf 'sys.argv.extend(["--checkpoint-ht-uri", %s])\n' "$(python3 -c 'import json, sys; print(json.dumps(sys.argv[1]))' "${CHECKPOINT_HT_URI}")" >> "${LOCAL_WRAPPER_SCRIPT}"
+fi
 
 if [[ -n "${REQUESTER_PAYS_PROJECT}" ]]; then
   printf 'sys.argv.extend(["--requester-pays-project", %s])\n' "$(python3 -c 'import json, sys; print(json.dumps(sys.argv[1]))' "${REQUESTER_PAYS_PROJECT}")" >> "${LOCAL_WRAPPER_SCRIPT}"
